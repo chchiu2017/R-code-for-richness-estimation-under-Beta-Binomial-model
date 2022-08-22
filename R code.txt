@@ -1,0 +1,122 @@
+###R code for calculating the estimate and s.e. of discussed estimator
+
+### required packages
+install.packages("maxLik")
+library(maxLik)
+install.packages("extraDistr")
+library(extraDistr)
+library(nlme)
+
+##R code for calculating richness estimate and its SD
+Chao2=function(data,t){
+  f1=sum(data==1);f2=sum(data==2);
+  K=(t-1)/t;Sobs=sum(data>0)
+  f0=K*ifelse(f2==0,f1*(f1-1)/2,f1^2/(2*f2));
+  S=Sobs+f0;f2=max(f2,1);
+  
+  func1=function(obs,f1,f2,t){obs+(t-1)/t*f1^2/(2*f2)}
+  M1=-c(f0,f1,f2)%*%t(c(f0,f1,f2))/S+diag(c(f0,f1,f2)) 
+  c1=-1;
+  c2=func1(Sobs,f1+1,f2,t)-func1(Sobs,f1,f2,t)
+  c3=func1(Sobs,f1,f2+1,t)-func1(Sobs,f1,f2,t)
+  V=c(c1,c2,c3)
+  sd=(t(V)%*%M1%*%V)^(1/2);
+  return(c(Chao2=S,Chao2_SD=sd))
+}
+Jack1=function(data,t){
+  f1=sum(data==1);Sobs=sum(data>0);
+  
+  func2=function(obs,f1,t){obs+(t-1)/t*f1}
+  S=f1+Sobs;f0=S-Sobs;
+  M2=-c(f0,f1)%*%t(c(f0,f1))/S+diag(c(f0,f1)) 
+  c1=-1;
+  c2=func2(Sobs,f1+1,t)-func2(Sobs,f1,t)
+  V=c(c1,c2)
+  sd=(t(V)%*%M2%*%V)^(1/2);
+  
+  return(c(Jack1=S,Jack1_SD=sd));
+}
+iChao2=function(da,t){
+  Sobs=sum(da>0);
+  f1=sum(da==1);f2=sum(da==2);f3=sum(da==3);f4=max(1,sum(da==4))
+  K=(t-1)/t;
+  chao2=Sobs+K*ifelse(f2==0,f1*(f1-1)/2,f1^2/(2*f2));
+  S=chao2+(t-3)/(4*t)*f3/f4*max(0,f1-(t-3)/(2*(t-1))*f2*f3/f4 )
+  
+  func3=function(obs,f1,f2,f3,f4,t){obs+(t-1)/t*f1^2/(2*f2)+
+      (t-3)/(4*t)*f3/f4*max(0,f1-(t-3)/(2*(t-1))*f2*f3/f4 )}
+  f0=S-Sobs;
+  M3=-c(f0,f1,f2,f3,f4)%*%t(c(f0,f1,f2,f3,f4))/S+diag(c(f0,f1,f2,f3,f4))    
+  c1=-1
+  c2=func3(Sobs,f1+1,f2,f3,f4,t)-func3(Sobs,f1,f2,f3,f4,t)
+  c3=func3(Sobs,f1,f2+1,f3,f4,t)-func3(Sobs,f1,f2,f3,f4,t)
+  c4=func3(Sobs,f1,f2,f3+1,f4,t)-func3(Sobs,f1,f2,f3,f4,t)
+  c5=func3(Sobs,f1,f2,f3,f4+1,t)-func3(Sobs,f1,f2,f3,f4,t)
+  V=c(c1,c2,c3,c4,c5)
+  sd=(t(V)%*%M3%*%V)^(1/2);
+  
+  
+  return(c(iChao2=S,iChao2_SD=sd));
+}
+MLE=function(x,t){
+  x=x[x>0];
+  loglike=function(p){ a=p[1];b=p[2]; -sum(dbbinom(x,t,a,b,log=TRUE))+length(x)*log(1-dbbinom(0,t,a,b))} 
+  fit=optim(c(1,1),loglike,method = c("L-BFGS-B"),lower =c(0.001,0.001));
+  a=fit$par[1];b=fit$par[2]
+  p0=dbbinom(0,t,a,b);
+  S=length(x)/(1-p0); 
+  
+  var.mle0=function(x,t,a,b){
+    x=x[x>0]
+    D=length(x);
+    M=max(x);
+    Pk=sapply(0:M,function(k)  dbbinom(k,t,a,b));
+    pk=Pk[-1];p0=Pk[1];
+    
+    Qk= sapply(1:M,function(k) sum(x==k));
+    S=D/(1-p0);
+    temp1=D*(1-D/S)/(1-p0)^2;
+    
+    dpda=(dbbinom(0,t,a+a/10^10,b)-dbbinom(0,t,a,b))/(a/10^10);
+    dpdb=(dbbinom(0,t,a,b+b/10^10)-dbbinom(0,t,a,b))/(b/10^10);
+    dG=(1/(1-p0)^2)*c(dpda,dpdb);
+    
+    logf=function(x,Qk,t){
+      a=x[1];b=x[2];
+      zz=which(Qk>0);
+      p0=exp(lgamma(a+b)+lgamma(b+t)-lgamma(b)-lgamma(a+b+t))
+      #temp1=sum(lchoose(t,zz));
+      temp2= lchoose(t,zz)+lgamma(a+b)-lgamma(a)-lgamma(b)+lgamma(a+zz)+lgamma(b+t-zz)-lgamma(a+b+t); 
+      temp3=sum(Qk)*log(1-p0)
+      res=sum(Qk[zz]*temp2)-temp3
+      res
+    }
+    Fisher.Info = (fdHess(c(a,b), Qk = Qk, t = t, fun = logf)$Hessian)
+    IIi = solve(Fisher.Info)
+    #print(IIi)
+    temp2=D^2*t(dG)%*%IIi%*%dG;
+    mle=abs(temp2)+temp1;
+    return(mle^(1/2))
+  }
+  sd=var.mle0(x,t,a,b);
+  return(c(MLE=S,MLE_SD=sd))
+} 
+BB=function(data,t){
+  Sobs=sum(data>0);R=(t-1)/t;
+  f1=sum(data==1);f2=sum(data==2);f3=sum(data==3);
+  chao1=ifelse(f2==0,f1*(f1-1)/2,f1^2/(2*f2));
+  K=max(1/2,min(1,2*f2^2/(3*max(1,f1)*max(1,f3))));
+  S=Sobs+R*chao1*(2-K);
+  
+  func4=function(obs,f1,f2,f3,t){obs+(t-1)/t*f1^2/(2*f2)*(2-max(1/2,min(1,2*f2^2/(3*max(1,f1*f3))))) }
+  f0=S-Sobs;
+  M4=-c(f0,f1,f2,f3)%*%t(c(f0,f1,f2,f3))/S+diag(c(f0,f1,f2,f3)) 
+  c1=-1
+  c2=func4(Sobs,f1+1,f2,f3,t)-func4(Sobs,f1,f2,f3,t)
+  c3=func4(Sobs,f1,f2+1,f3,t)-func4(Sobs,f1,f2,f3,t)
+  c4=func4(Sobs,f1,f2,f3+1,t)-func4(Sobs,f1,f2,f3,t)
+  V=c(c1,c2,c3,c4)
+  sd=(t(V)%*%M4%*%V)^(1/2);
+  
+  return(c(BB=S,BB_SD=sd))
+}
